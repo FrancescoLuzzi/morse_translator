@@ -15,8 +15,8 @@ pub fn get_reader(arg: &str) -> Box<dyn BufRead> {
 pub fn get_writer(arg: &str) -> io::Result<File> {
     match arg {
         "-" | "" => {
-            let lock = io::stdout().lock();
-            #[cfg(any(target_family = "unix", target_family = "wasi"))]
+            let lock = io::stdout();
+            #[cfg(any(target_family = "unix", target_family = "wasm"))]
             unsafe {
                 use std::os::unix::io::{AsRawFd, FromRawFd};
                 Ok(std::fs::File::from_raw_fd(lock.as_raw_fd()))

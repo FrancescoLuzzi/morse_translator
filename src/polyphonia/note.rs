@@ -7,10 +7,14 @@ impl Note {
         self.0
     }
 
-    pub fn combine(notes: &[Self], secs: f32, volume: &Amplitude) -> Vec<i16> {
+    pub fn combine<'a>(
+        notes: &'a [Self],
+        secs: f32,
+        volume: &'a Amplitude,
+    ) -> impl Iterator<Item = i16> + 'a {
         let nsamples = secs * SAMPLE_RATE as f32;
         (0..nsamples as u32)
-            .map(|t| {
+            .map(move |t| {
                 notes.iter().map(move |note| match volume {
                     Amplitude::Silent => 0_f32,
                     _ => oscillator(
@@ -27,7 +31,6 @@ impl Note {
                 let (len, sum) = step.fold((0, 0_f32), |(len, sum), x| (len + 1, sum + x));
                 f32::floor(MAX_AMPLITUDE * volume.scaling() * sum / len as f32) as i16
             })
-            .collect::<Vec<i16>>()
     }
 
     pub fn audio_wave(&self, secs: f32, volume: &Amplitude) -> Vec<i16> {

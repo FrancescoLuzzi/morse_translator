@@ -20,7 +20,7 @@ impl WavWriterStatus for Created {}
 impl WavWriterStatus for Initiated {}
 
 #[derive(Debug, Clone, Copy)]
-pub struct WavOptions {
+pub struct WavHeader {
     written_data: u32,
     chunk_size: u32,
     pcm: u16,
@@ -31,7 +31,7 @@ pub struct WavOptions {
     bits_per_sample: u16,
 }
 
-impl Default for WavOptions {
+impl Default for WavHeader {
     fn default() -> Self {
         Self {
             written_data: 0,
@@ -46,15 +46,15 @@ impl Default for WavOptions {
     }
 }
 
-impl WavOptions {
+impl WavHeader {
     pub fn align(&mut self) {
         self.bytes_per_sample = self.bits_per_sample / 8;
         self.bytes_per_second = self.sample_rate * self.bytes_per_sample as u32;
     }
 }
 
-impl From<&WavOptions> for [u8; HEADER_SIZE] {
-    fn from(val: &WavOptions) -> Self {
+impl From<&WavHeader> for [u8; HEADER_SIZE] {
+    fn from(val: &WavHeader) -> Self {
         let mut out = [0_u8; HEADER_SIZE];
         out[..4].copy_from_slice(b"RIFF");
         // data length + header_size - riff - 4bytes
@@ -77,7 +77,7 @@ impl From<&WavOptions> for [u8; HEADER_SIZE] {
 
 #[derive(Default)]
 pub struct WavBuilder {
-    wav_opts: WavOptions,
+    wav_opts: WavHeader,
 }
 
 impl WavBuilder {
@@ -119,7 +119,7 @@ where
     S: WavWriterStatus,
 {
     out_buffer: &'a mut T,
-    wav_opts: WavOptions,
+    wav_opts: WavHeader,
     header_position: u64,
     status: PhantomData<S>,
 }
@@ -152,7 +152,7 @@ impl<'a, T> WavWriter<'a, T, Created>
 where
     T: WavOutBuffer,
 {
-    fn new(out_buffer: &'a mut T, wav_opts: WavOptions) -> Self {
+    fn new(out_buffer: &'a mut T, wav_opts: WavHeader) -> Self {
         Self {
             out_buffer,
             wav_opts,
@@ -174,9 +174,12 @@ where
 // behaviour after initiating the writer
 // functions available are `write_half_words` and `close`
 impl<'a, T: WavOutBuffer> WavWriter<'a, T, Initiated> {
-    pub fn write_half_words(&mut self, data: &[i16]) -> io::Result<()> {
+    pub fn write_half_words<I>(&mut self, data: I) -> io::Result<()>
+    where
+        I: IntoIterator<Item = i16>,
+    {
         for half_word in data {
-            self.write_all(&(*half_word as u16).to_le_bytes())?;
+            self.write_all(&half_word.to_le_bytes())?;
         }
         Ok(())
     }
@@ -231,16 +234,16 @@ fn test_file() {
     let mut wav_file = wav_file.init().unwrap();
     wav_file.write_all(&[0; 28]).unwrap();
     wav_file
-        .write_half_words(&notable_notes::C4.audio_wave(3.0, &Amplitude::Medium))
+        .write_half_words(notable_notes::C4.audio_wave(3.0, &Amplitude::Medium))
         .unwrap();
     wav_file
-        .write_half_words(&notable_notes::A4.audio_wave(3.0, &Amplitude::Silent))
+        .write_half_words(notable_notes::A4.audio_wave(3.0, &Amplitude::Silent))
         .unwrap();
     wav_file
-        .write_half_words(&notable_notes::A4.audio_wave(3.0, &Amplitude::Low))
+        .write_half_words(notable_notes::A4.audio_wave(3.0, &Amplitude::Low))
         .unwrap();
     wav_file
-        .write_half_words(&Note::combine(
+        .write_half_words(Note::combine(
             &[notable_notes::A4, notable_notes::C4_SH, notable_notes::E0],
             3.0,
             &Amplitude::Medium,

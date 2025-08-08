@@ -2,9 +2,7 @@ use crate::parser::{MorseCommand, MorseTraductionType};
 use crate::polyphonia::SAMPLE_RATE;
 use crate::wav::wav_writer::{WavBuilder, WavOutBuffer};
 use crate::Letter;
-use std::cell::RefCell;
 use std::error::Error;
-use std::rc::Rc;
 use std::str::{self, FromStr};
 
 pub trait MorseTranslator<T, W, R> {
@@ -29,8 +27,14 @@ pub struct StreamedMorseTranslator<T: WavOutBuffer> {
     // this patter will create and use a StreamedMorseTranslator
     // or an AudioMorseTranslation trasparently
     input_stream: Vec<String>,
-    pub output_stream: Rc<RefCell<T>>,
+    pub output_stream: T,
     pub traduction_type: MorseTraductionType,
+}
+
+impl<T: WavOutBuffer> StreamedMorseTranslator<T> {
+    pub fn builder() -> TranslatorBuilder<T> {
+        TranslatorBuilder::default()
+    }
 }
 
 impl<'l, T: WavOutBuffer> MorseTranslator<&str, Vec<Letter<'l>>, ()>
@@ -50,13 +54,11 @@ impl<'l, T: WavOutBuffer> MorseTranslator<&str, Vec<Letter<'l>>, ()>
         };
 
         let translated_lines = self.input_stream.iter().flat_map(|line| read_cmd(line));
-        let mut output = self.output_stream.as_ref().borrow_mut();
         let wav = WavBuilder::new()
             .sample_rate(SAMPLE_RATE)
-            .set_output(&mut *output);
+            .set_output(&mut self.output_stream);
         let mut wav = wav.init()?;
-        wav.write_half_words(&Letter::concat_audio(translated_lines))?;
-        // Letter::concat_audio(translated_lines),
+        wav.write_half_words(Letter::concat_audio(translated_lines))?;
         wav.close()?;
         Ok(())
     }
@@ -67,22 +69,33 @@ impl<'l, T: WavOutBuffer> MorseTranslator<&str, Vec<Letter<'l>>, ()>
             MorseCommand::Decode => Self::decode,
         };
 
-        let translate_cmd = match command {
-            MorseCommand::Encode => Letter::concat_morse,
-            MorseCommand::Decode => Letter::concat_text,
-        };
-
         let translated_lines = self.input_stream.iter().map(|line| read_cmd(line));
 
-        let mut output = self.output_stream.as_ref().borrow_mut();
-        let last_index = translated_lines.len() - 1;
-        for (i, line) in translated_lines.map(translate_cmd).enumerate() {
-            output.write_all(&line)?;
-            if i != last_index {
-                output.write_all(b"\n")?;
+        match command {
+            MorseCommand::Encode => {
+                let mut buff = Vec::with_capacity(30);
+                for line in translated_lines.map(Letter::concat_morse) {
+                    unsafe {
+                        buff.set_len(0);
+                    }
+                    buff.extend(line);
+                    buff.extend(b"\n");
+                    self.output_stream.write_all(&buff)?;
+                }
             }
-        }
-        output.flush()?;
+            MorseCommand::Decode => {
+                let mut buff = Vec::with_capacity(30);
+                for line in translated_lines.map(Letter::concat_text) {
+                    unsafe {
+                        buff.set_len(0);
+                    }
+                    buff.extend(line);
+                    buff.extend(b"\n");
+                    self.output_stream.write_all(&buff)?;
+                }
+            }
+        };
+        self.output_stream.flush()?;
         Ok(())
     }
 
@@ -110,7 +123,7 @@ impl<'l, T: WavOutBuffer> MorseTranslator<&str, Vec<Letter<'l>>, ()>
 pub struct TranslatorBuilder<T: WavOutBuffer> {
     traduction_type: MorseTraductionType,
     input_stream: Option<Vec<String>>,
-    output_stream: Option<Rc<RefCell<T>>>,
+    output_stream: Option<T>,
 }
 
 impl<T: WavOutBuffer> TranslatorBuilder<T> {
@@ -118,33 +131,35 @@ impl<T: WavOutBuffer> TranslatorBuilder<T> {
         Default::default()
     }
 
-    pub fn input_stream(&mut self, input_stream: Vec<String>) -> &mut Self {
-        self.input_stream = Some(input_stream);
-        self
+    pub fn input_stream(self, input_stream: Vec<String>) -> Self {
+        Self {
+            input_stream: Some(input_stream),
+            ..self
+        }
     }
 
-    pub fn output_stream(&mut self, out_stream: Rc<RefCell<T>>) -> &mut Self {
-        self.output_stream = Some(out_stream);
-        self
+    pub fn output_stream(self, out_stream: T) -> Self {
+        Self {
+            output_stream: Some(out_stream),
+            ..self
+        }
     }
 
-    pub fn traduction_type(&mut self, traduction_type: MorseTraductionType) -> &mut Self {
-        self.traduction_type = traduction_type;
-        self
+    pub fn traduction_type(self, traduction_type: MorseTraductionType) -> Self {
+        Self {
+            traduction_type,
+            ..self
+        }
     }
 
-    pub fn build_streamed(&self) -> Result<StreamedMorseTranslator<T>, String> {
+    pub fn build_streamed(self) -> Result<StreamedMorseTranslator<T>, String> {
         Ok(StreamedMorseTranslator {
             input_stream: self
                 .input_stream
                 .as_ref()
                 .expect("input_stream not set")
                 .clone(),
-            output_stream: self
-                .output_stream
-                .as_ref()
-                .expect("output_stream not set")
-                .clone(),
+            output_stream: self.output_stream.expect("output_stream not set"),
             traduction_type: self.traduction_type.clone(),
         })
     }

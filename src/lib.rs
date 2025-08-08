@@ -5,66 +5,53 @@ pub mod utils;
 pub mod wav;
 
 use polyphonia::{notable_notes, Amplitude};
-use std::str::FromStr;
+use std::{str::FromStr, sync::LazyLock};
 
 const DOT_DURATION: f32 = 0.1;
-const LINE_DURATION: f32 = DOT_DURATION * 2.0;
+const LETTER_SEPARATION_DURATION: f32 = DOT_DURATION * 3.0;
+const LINE_DURATION: f32 = DOT_DURATION * 3.0;
 const SLASH_DURATION: f32 = DOT_DURATION * 4.0;
+
+static LETTER_SEPARATION: LazyLock<Vec<i16>> =
+    LazyLock::new(|| notable_notes::G0.audio_wave(LETTER_SEPARATION_DURATION, &Amplitude::Silent));
 
 #[derive(Debug)]
 pub struct Letter<'a>(&'a str, &'a str);
 
-impl<'a> Letter<'a> {
-    pub fn concat_morse(args: Vec<Letter<'_>>) -> Vec<u8> {
-        let mut iter_args = args.iter();
-        let first_letter = iter_args.next();
-        let mut output: Vec<u8> = Vec::new();
-
-        if first_letter.is_none() {
-            return output;
-        }
-
-        // add first letter without b" "
-        let Letter(_, morse) = first_letter.unwrap();
-        output.extend_from_slice(morse.as_bytes());
-
-        for letter in iter_args {
-            let Letter(_, morse) = letter;
-            output.extend_from_slice(b" ");
-            output.extend_from_slice(morse.as_bytes());
-        }
-        output
+impl Letter<'_> {
+    pub fn concat_morse<'a, T>(args: T) -> impl Iterator<Item = u8> + 'a
+    where
+        T: IntoIterator<Item = Letter<'a>> + 'a,
+    {
+        args.into_iter()
+            .flat_map(|Letter(_, morse)| morse.as_bytes().iter().chain(b" "))
+            .cloned()
     }
 
-    pub fn concat_text(args: Vec<Letter<'_>>) -> Vec<u8> {
-        let mut output: Vec<u8> = Vec::new();
-        for letter in args {
-            let Letter(text, _) = letter;
-            output.extend_from_slice(text.as_bytes());
-        }
-        output
+    pub fn concat_text<'a, T>(args: T) -> impl Iterator<Item = u8> + 'a
+    where
+        T: IntoIterator<Item = Letter<'a>> + 'a,
+    {
+        args.into_iter()
+            .flat_map(|Letter(text, _)| text.as_bytes())
+            .copied()
     }
 
-    pub fn concat_audio<T: Iterator<Item = Letter<'a>>>(args: T) -> Vec<i16> {
-        let mut output: Vec<i16> = Vec::new();
-        for ch in args
-            .map(|x| -> &str {
-                let Self(_, y) = x;
-                y
-            })
+    pub fn concat_audio<'a, T: Iterator<Item = Letter<'a>> + 'a>(
+        args: T,
+    ) -> impl Iterator<Item = i16> + 'a {
+        args.map(|Letter(_, y)| y)
             .flat_map(|x| x.chars())
-        {
-            let chunk = match ch {
-                '.' => notable_notes::A4.audio_wave(DOT_DURATION, &Amplitude::Medium),
-                '-' => notable_notes::A4.audio_wave(LINE_DURATION, &Amplitude::Medium),
-                '/' => notable_notes::A4.audio_wave(SLASH_DURATION, &Amplitude::Silent),
-                _ => Vec::new(),
-            };
-            output.extend_from_slice(&chunk);
-            output
-                .extend_from_slice(&notable_notes::G0.audio_wave(DOT_DURATION, &Amplitude::Silent))
-        }
-        output
+            .flat_map(|ch| {
+                let mut chunk = match ch {
+                    '.' => notable_notes::A4.audio_wave(DOT_DURATION, &Amplitude::Medium),
+                    '-' => notable_notes::A4.audio_wave(LINE_DURATION, &Amplitude::Medium),
+                    '/' => notable_notes::A4.audio_wave(SLASH_DURATION, &Amplitude::Silent),
+                    _ => Vec::new(),
+                };
+                chunk.extend_from_slice(&LETTER_SEPARATION);
+                chunk
+            })
     }
 }
 
